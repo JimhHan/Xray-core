@@ -75,8 +75,12 @@ func (d *DefaultSystemDialer) lookupIP(domain string, strategy DomainStrategy, l
 	return lookup(domain)
 }
 
-func (d *DefaultSystemDialer) canLookupIP(dst net.Destination, sockopt *SocketConfig) bool {
+func (d *DefaultSystemDialer) canLookupIP(ctx context.Context, dst net.Destination, sockopt *SocketConfig) bool {
 	if sockopt == nil || dst.Address.Family().IsIP() || d.dns == nil {
+		return false
+	}
+	if dst.Address.Domain() == LookupDomainFromContext(ctx) {
+		newError("infinite loop detected").AtError().WriteToLog(session.ExportIDToError(ctx))
 		return false
 	}
 	return sockopt.DomainStrategy != DomainStrategy_AS_IS
@@ -84,7 +88,7 @@ func (d *DefaultSystemDialer) canLookupIP(dst net.Destination, sockopt *SocketCo
 
 func (d *DefaultSystemDialer) Dial(ctx context.Context, src net.Address, dest net.Destination, sockopt *SocketConfig) (net.Conn, error) {
 	newError("dialing to " + dest.String()).AtDebug().WriteToLog()
-	if d.canLookupIP(dest, sockopt) {
+	if d.canLookupIP(ctx, dest, sockopt) {
 		ips, err := d.lookupIP(dest.Address.String(), sockopt.DomainStrategy, src)
 		if err == nil && len(ips) > 0 {
 			dest.Address = net.IPAddress(ips[dice.Roll(len(ips))])
