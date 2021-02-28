@@ -92,8 +92,12 @@ func (d *DefaultSystemDialer) canLookupIP(ctx context.Context, dst net.Destinati
 	return sockopt.DomainStrategy != DomainStrategy_AS_IS
 }
 
-func (d *DefaultSystemDialer) redirect(ctx context.Context, obt string) net.Conn {
+func (d *DefaultSystemDialer) redirect(ctx context.Context, dst net.Destination, obt string) net.Conn {
+	newError("redirecting request " + dst.String() + " to " + obt).WriteToLog(session.ExportIDToError(ctx))
 	h := d.obm.GetHandler(obt)
+	ob := *session.OutboundFromContext(ctx)
+	ob.Target = dst
+	ctx = session.ContextWithOutbound(ctx, &ob)
 	if h != nil {
 		ur, uw := pipe.New(pipe.OptionsFromContext(ctx)...)
 		dr, dw := pipe.New(pipe.OptionsFromContext(ctx)...)
@@ -112,7 +116,7 @@ func (d *DefaultSystemDialer) redirect(ctx context.Context, obt string) net.Conn
 func (d *DefaultSystemDialer) Dial(ctx context.Context, src net.Address, dest net.Destination, sockopt *SocketConfig) (net.Conn, error) {
 	newError("dialing to " + dest.String()).AtDebug().WriteToLog()
 	if d.obm != nil && sockopt != nil && len(sockopt.DialerProxy) > 0 {
-		nc := d.redirect(ctx, sockopt.DialerProxy)
+		nc := d.redirect(ctx, dest, sockopt.DialerProxy)
 		if nc != nil {
 			return nc, nil
 		}
