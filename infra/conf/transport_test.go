@@ -2,13 +2,13 @@ package conf_test
 
 import (
 	"encoding/json"
+	"github.com/xtls/xray-core/transport/global"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/xtls/xray-core/common/protocol"
 	"github.com/xtls/xray-core/common/serial"
 	. "github.com/xtls/xray-core/infra/conf"
-	"github.com/xtls/xray-core/transport"
 	"github.com/xtls/xray-core/transport/internet"
 	"github.com/xtls/xray-core/transport/internet/headers/http"
 	"github.com/xtls/xray-core/transport/internet/headers/noop"
@@ -97,7 +97,7 @@ func TestTransportConfig(t *testing.T) {
 				}
 			}`,
 			Parser: createParser(),
-			Output: &transport.Config{
+			Output: &global.Config{
 				TransportSettings: []*internet.TransportConfig{
 					{
 						ProtocolName: "tcp",
