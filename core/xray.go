@@ -253,7 +253,10 @@ func initInstanceWithConfig(config *Config, server *Instance) (bool, error) {
 		}
 	}
 
-	internet.SetSystemDialerDNS(server.GetFeature(dns.ClientType()).(dns.Client))
+	internet.InitSystemDialer(
+		server.GetFeature(dns.ClientType()).(dns.Client),
+		server.GetFeature(outbound.ManagerType()).(outbound.Manager),
+	)
 
 	if server.featureResolutions != nil {
 		return true, newError("not all dependency are resolved.")

@@ -2,6 +2,11 @@ package internet
 
 import (
 	"context"
+	"github.com/xtls/xray-core/common"
+	"github.com/xtls/xray-core/common/net/cnc"
+	"github.com/xtls/xray-core/features/outbound"
+	"github.com/xtls/xray-core/transport"
+	"github.com/xtls/xray-core/transport/pipe"
 	"syscall"
 	"time"
 
@@ -15,19 +20,20 @@ var (
 	effectiveSystemDialer SystemDialer = &DefaultSystemDialer{}
 )
 
-// SetSystemDialerDNS: It's private method and you are NOT supposed to use this function.
-func SetSystemDialerDNS(dc dns.Client) {
-	effectiveSystemDialer.setDnsClient(dc)
+// InitSystemDialer: It's private method and you are NOT supposed to use this function.
+func InitSystemDialer(dc dns.Client, om outbound.Manager) {
+	effectiveSystemDialer.init(dc, om)
 }
 
 type SystemDialer interface {
 	Dial(ctx context.Context, source net.Address, destination net.Destination, sockopt *SocketConfig) (net.Conn, error)
-	setDnsClient(dc dns.Client)
+	init(dc dns.Client, om outbound.Manager)
 }
 
 type DefaultSystemDialer struct {
 	controllers []controller
 	dns         dns.Client
+	obm         outbound.Manager
 }
 
 func resolveSrcAddr(network net.Network, src net.Address) net.Addr {
@@ -86,8 +92,32 @@ func (d *DefaultSystemDialer) canLookupIP(ctx context.Context, dst net.Destinati
 	return sockopt.DomainStrategy != DomainStrategy_AS_IS
 }
 
+func (d *DefaultSystemDialer) redirect(ctx context.Context, obt string) net.Conn {
+	h := d.obm.GetHandler(obt)
+	if h != nil {
+		ur, uw := pipe.New(pipe.OptionsFromContext(ctx)...)
+		dr, dw := pipe.New(pipe.OptionsFromContext(ctx)...)
+
+		go h.Dispatch(ctx, &transport.Link{ur, dw})
+		nc := cnc.NewConnection(
+			cnc.ConnectionInputMulti(uw),
+			cnc.ConnectionOutputMulti(dr),
+			cnc.ConnectionOnClose(common.ChainedClosable{uw, dw}),
+		)
+		return nc
+	}
+	return nil
+}
+
 func (d *DefaultSystemDialer) Dial(ctx context.Context, src net.Address, dest net.Destination, sockopt *SocketConfig) (net.Conn, error) {
 	newError("dialing to " + dest.String()).AtDebug().WriteToLog()
+	if d.obm != nil && len(sockopt.DialerProxy) > 0 {
+		nc := d.redirect(ctx, sockopt.DialerProxy)
+		if nc != nil {
+			return nc, nil
+		}
+	}
+
 	if d.canLookupIP(ctx, dest, sockopt) {
 		ips, err := d.lookupIP(dest.Address.String(), sockopt.DomainStrategy, src)
 		if err == nil && len(ips) > 0 {
@@ -152,8 +182,9 @@ func (d *DefaultSystemDialer) Dial(ctx context.Context, src net.Address, dest ne
 	return dialer.DialContext(ctx, dest.Network.SystemString(), dest.NetAddr())
 }
 
-func (d *DefaultSystemDialer) setDnsClient(dc dns.Client) {
+func (d *DefaultSystemDialer) init(dc dns.Client, om outbound.Manager) {
 	d.dns = dc
+	d.obm = om
 }
 
 type PacketConnWrapper struct {
@@ -216,7 +247,7 @@ func WithAdapter(dialer SystemDialerAdapter) SystemDialer {
 	}
 }
 
-func (v *SimpleSystemDialer) setDnsClient(dc dns.Client) {}
+func (v *SimpleSystemDialer) init(_ dns.Client, _ outbound.Manager) {}
 
 func (v *SimpleSystemDialer) Dial(ctx context.Context, src net.Address, dest net.Destination, sockopt *SocketConfig) (net.Conn, error) {
 	return v.adapter.Dial(dest.Network.SystemString(), dest.NetAddr())
